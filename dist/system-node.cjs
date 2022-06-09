@@ -2901,7 +2901,7 @@ function resolveImportMap (importMap, resolvedOrPlain, parentUrl) {
 // CONCATENATED MODULE: ./src/system-core.js
 /*
  * SystemJS Core
- * 
+ *
  * Provides
  * - System.import
  * - System.register support for
@@ -2911,7 +2911,7 @@ function resolveImportMap (importMap, resolvedOrPlain, parentUrl) {
  * - Symbol.toStringTag support in Module objects
  * - Hookable System.createContext to customize import.meta
  * - System.onload(err, id, deps) handler for tracing / hot-reloading
- * 
+ *
  * Core comes with no System.prototype.resolve or
  * System.prototype.instantiate implementations
  */
@@ -2920,24 +2920,36 @@ function resolveImportMap (importMap, resolvedOrPlain, parentUrl) {
 
 
 var toStringTag = hasSymbol && Symbol.toStringTag;
-var REGISTRY = hasSymbol ? Symbol() : '@';
+var REGISTRY = hasSymbol ? Symbol() : "@";
 
-function SystemJS () {
+function SystemJS() {
   this[REGISTRY] = {};
 }
 
 var systemJSPrototype = SystemJS.prototype;
 
 systemJSPrototype.import = function (id, parentUrl) {
-  var loader = this;
-  return Promise.resolve(loader.prepareImport())
-  .then(function() {
-    return loader.resolve(id, parentUrl);
-  })
-  .then(function (id) {
-    var load = getOrCreateLoad(loader, id);
-    return load.C || topLevelLoad(loader, load);
-  });
+  const arr = id.split("/");
+  const resourceName = arr[arr.length - 1].split(".")[0];
+
+  const localAddress = localStorage.getItem(resourceName);
+  if (!localAddress) {
+    localStorage.setItem(resourceName, "");
+  }
+
+  const __import__ = function (id, parentUrl) {
+    var loader = this;
+    return Promise.resolve(loader.prepareImport())
+      .then(function () {
+        return loader.resolve(id, parentUrl);
+      })
+      .then(function (id) {
+        var load = getOrCreateLoad(loader, id);
+        return load.C || topLevelLoad(loader, load);
+      });
+  };
+
+  return __import__.call(this, localAddress || id, parentUrl);
 };
 
 // Hookable createContext function -> allowing eg custom import meta
@@ -2947,20 +2959,18 @@ systemJSPrototype.createContext = function (parentId) {
     url: parentId,
     resolve: function (id, parentUrl) {
       return Promise.resolve(loader.resolve(id, parentUrl || parentId));
-    }
+    },
   };
 };
 
 // onLoad(err, id, deps) provided for tracing / hot-reloading
-if (!process.env.SYSTEM_PRODUCTION)
-  systemJSPrototype.onload = function () {};
-function loadToId (load) {
+if (!process.env.SYSTEM_PRODUCTION) systemJSPrototype.onload = function () {};
+function loadToId(load) {
   return load.id;
 }
-function triggerOnload (loader, load, err, isErrSource) {
+function triggerOnload(loader, load, err, isErrSource) {
   loader.onload(err, load.id, load.d && load.d.map(loadToId), !!isErrSource);
-  if (err)
-    throw err;
+  if (err) throw err;
 }
 
 var lastRegister;
@@ -2977,164 +2987,175 @@ systemJSPrototype.getRegister = function () {
   return _lastRegister;
 };
 
-function getOrCreateLoad (loader, id, firstParentUrl) {
+function getOrCreateLoad(loader, id, firstParentUrl) {
   var load = loader[REGISTRY][id];
-  if (load)
-    return load;
+  if (load) return load;
 
   var importerSetters = [];
   var ns = Object.create(null);
-  if (toStringTag)
-    Object.defineProperty(ns, toStringTag, { value: 'Module' });
-  
+  if (toStringTag) Object.defineProperty(ns, toStringTag, { value: "Module" });
+
   var instantiatePromise = Promise.resolve()
-  .then(function () {
-    return loader.instantiate(id, firstParentUrl);
-  })
-  .then(function (registration) {
-    if (!registration)
-      throw Error(errMsg(2, process.env.SYSTEM_PRODUCTION ? id : 'Module ' + id + ' did not instantiate'));
-    function _export (name, value) {
-      // note if we have hoisted exports (including reexports)
-      load.h = true;
-      var changed = false;
-      if (typeof name === 'string') {
-        if (!(name in ns) || ns[name] !== value) {
-          ns[name] = value;
-          changed = true;
-        }
-      }
-      else {
-        for (var p in name) {
-          var value = name[p];
-          if (!(p in ns) || ns[p] !== value) {
-            ns[p] = value;
-            changed = true;
-          }
-        }
+    .then(function () {
+      return loader.instantiate(id, firstParentUrl);
+    })
+    .then(
+      function (registration) {
+        if (!registration)
+          throw Error(
+            errMsg(
+              2,
+              process.env.SYSTEM_PRODUCTION
+                ? id
+                : "Module " + id + " did not instantiate"
+            )
+          );
+        function _export(name, value) {
+          // note if we have hoisted exports (including reexports)
+          load.h = true;
+          var changed = false;
+          if (typeof name === "string") {
+            if (!(name in ns) || ns[name] !== value) {
+              ns[name] = value;
+              changed = true;
+            }
+          } else {
+            for (var p in name) {
+              var value = name[p];
+              if (!(p in ns) || ns[p] !== value) {
+                ns[p] = value;
+                changed = true;
+              }
+            }
 
-        if (name && name.__esModule) {
-          ns.__esModule = name.__esModule;
+            if (name && name.__esModule) {
+              ns.__esModule = name.__esModule;
+            }
+          }
+          if (changed)
+            for (var i = 0; i < importerSetters.length; i++) {
+              var setter = importerSetters[i];
+              if (setter) setter(ns);
+            }
+          return value;
         }
-      }
-      if (changed)
-        for (var i = 0; i < importerSetters.length; i++) {
-          var setter = importerSetters[i];
-          if (setter) setter(ns);
-        }
-      return value;
-    }
-    var declared = registration[1](_export, registration[1].length === 2 ? {
-      import: function (importId) {
-        return loader.import(importId, id);
+        var declared = registration[1](
+          _export,
+          registration[1].length === 2
+            ? {
+                import: function (importId) {
+                  return loader.import(importId, id);
+                },
+                meta: loader.createContext(id),
+              }
+            : undefined
+        );
+        load.e = declared.execute || function () {};
+        return [registration[0], declared.setters || []];
       },
-      meta: loader.createContext(id)
-    } : undefined);
-    load.e = declared.execute || function () {};
-    return [registration[0], declared.setters || []];
-  }, function (err) {
-    load.e = null;
-    load.er = err;
-    if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, err, true);
-    throw err;
-  });
+      function (err) {
+        load.e = null;
+        load.er = err;
+        if (!process.env.SYSTEM_PRODUCTION)
+          triggerOnload(loader, load, err, true);
+        throw err;
+      }
+    );
 
-  var linkPromise = instantiatePromise
-  .then(function (instantiation) {
-    return Promise.all(instantiation[0].map(function (dep, i) {
-      var setter = instantiation[1][i];
-      return Promise.resolve(loader.resolve(dep, id))
-      .then(function (depId) {
-        var depLoad = getOrCreateLoad(loader, depId, id);
-        // depLoad.I may be undefined for already-evaluated
-        return Promise.resolve(depLoad.I)
-        .then(function () {
-          if (setter) {
-            depLoad.i.push(setter);
-            // only run early setters when there are hoisted exports of that module
-            // the timing works here as pending hoisted export calls will trigger through importerSetters
-            if (depLoad.h || !depLoad.I)
-              setter(depLoad.n);
-          }
-          return depLoad;
+  var linkPromise = instantiatePromise.then(function (instantiation) {
+    return Promise.all(
+      instantiation[0].map(function (dep, i) {
+        var setter = instantiation[1][i];
+        return Promise.resolve(loader.resolve(dep, id)).then(function (depId) {
+          var depLoad = getOrCreateLoad(loader, depId, id);
+          // depLoad.I may be undefined for already-evaluated
+          return Promise.resolve(depLoad.I).then(function () {
+            if (setter) {
+              depLoad.i.push(setter);
+              // only run early setters when there are hoisted exports of that module
+              // the timing works here as pending hoisted export calls will trigger through importerSetters
+              if (depLoad.h || !depLoad.I) setter(depLoad.n);
+            }
+            return depLoad;
+          });
         });
-      });
-    }))
-    .then(function (depLoads) {
+      })
+    ).then(function (depLoads) {
       load.d = depLoads;
     });
   });
-  if (!process.env.SYSTEM_BROWSER)
-    linkPromise.catch(function () {});
+  if (!process.env.SYSTEM_BROWSER) linkPromise.catch(function () {});
 
   // Capital letter = a promise function
-  return load = loader[REGISTRY][id] = {
-    id: id,
-    // importerSetters, the setters functions registered to this dependency
-    // we retain this to add more later
-    i: importerSetters,
-    // module namespace object
-    n: ns,
+  return (load = loader[REGISTRY][id] =
+    {
+      id: id,
+      // importerSetters, the setters functions registered to this dependency
+      // we retain this to add more later
+      i: importerSetters,
+      // module namespace object
+      n: ns,
 
-    // instantiate
-    I: instantiatePromise,
-    // link
-    L: linkPromise,
-    // whether it has hoisted exports
-    h: false,
+      // instantiate
+      I: instantiatePromise,
+      // link
+      L: linkPromise,
+      // whether it has hoisted exports
+      h: false,
 
-    // On instantiate completion we have populated:
-    // dependency load records
-    d: undefined,
-    // execution function
-    e: undefined,
+      // On instantiate completion we have populated:
+      // dependency load records
+      d: undefined,
+      // execution function
+      e: undefined,
 
-    // On execution we have populated:
-    // the execution error if any
-    er: undefined,
-    // in the case of TLA, the execution promise
-    E: undefined,
+      // On execution we have populated:
+      // the execution error if any
+      er: undefined,
+      // in the case of TLA, the execution promise
+      E: undefined,
 
-    // On execution, L, I, E cleared
+      // On execution, L, I, E cleared
 
-    // Promise for top-level completion
-    C: undefined,
+      // Promise for top-level completion
+      C: undefined,
 
-    // parent instantiator / executor
-    p: undefined
-  };
+      // parent instantiator / executor
+      p: undefined,
+    });
 }
 
-function instantiateAll (loader, load, parent, loaded) {
+function instantiateAll(loader, load, parent, loaded) {
   if (!loaded[load.id]) {
     loaded[load.id] = true;
     // load.L may be undefined for already-instantiated
     return Promise.resolve(load.L)
-    .then(function () {
-      if (!load.p || load.p.e === null)
-        load.p = parent;
-      return Promise.all(load.d.map(function (dep) {
-        return instantiateAll(loader, dep, parent, loaded);
-      }));
-    })
-    .catch(function (err) {
-      if (load.er)
+      .then(function () {
+        if (!load.p || load.p.e === null) load.p = parent;
+        return Promise.all(
+          load.d.map(function (dep) {
+            return instantiateAll(loader, dep, parent, loaded);
+          })
+        );
+      })
+      .catch(function (err) {
+        if (load.er) throw err;
+        load.e = null;
+        if (!process.env.SYSTEM_PRODUCTION)
+          triggerOnload(loader, load, err, false);
         throw err;
-      load.e = null;
-      if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, err, false);
-      throw err;
-    });
+      });
   }
 }
 
-function topLevelLoad (loader, load) {
-  return load.C = instantiateAll(loader, load, load, {})
-  .then(function () {
-    return postOrderExec(loader, load, {});
-  })
-  .then(function () {
-    return load.n;
-  });
+function topLevelLoad(loader, load) {
+  return (load.C = instantiateAll(loader, load, load, {})
+    .then(function () {
+      return postOrderExec(loader, load, {});
+    })
+    .then(function () {
+      return load.n;
+    }));
 }
 
 // the closest we can get to call(undefined)
@@ -3142,16 +3163,13 @@ var nullContext = Object.freeze(Object.create(null));
 
 // returns a promise if and only if a top-level await subgraph
 // throws on sync errors
-function postOrderExec (loader, load, seen) {
-  if (seen[load.id])
-    return;
+function postOrderExec(loader, load, seen) {
+  if (seen[load.id]) return;
   seen[load.id] = true;
 
   if (!load.e) {
-    if (load.er)
-      throw load.er;
-    if (load.E)
-      return load.E;
+    if (load.er) throw load.er;
+    if (load.E) return load.E;
     return;
   }
 
@@ -3160,48 +3178,51 @@ function postOrderExec (loader, load, seen) {
   load.d.forEach(function (depLoad) {
     try {
       var depLoadPromise = postOrderExec(loader, depLoad, seen);
-      if (depLoadPromise) 
+      if (depLoadPromise)
         (depLoadPromises = depLoadPromises || []).push(depLoadPromise);
-    }
-    catch (err) {
+    } catch (err) {
       load.e = null;
       load.er = err;
-      if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, err, false);
+      if (!process.env.SYSTEM_PRODUCTION)
+        triggerOnload(loader, load, err, false);
       throw err;
     }
   });
-  if (depLoadPromises)
-    return Promise.all(depLoadPromises).then(doExec);
+  if (depLoadPromises) return Promise.all(depLoadPromises).then(doExec);
 
   return doExec();
 
-  function doExec () {
+  function doExec() {
     try {
       var execPromise = load.e.call(nullContext);
       if (execPromise) {
-        execPromise = execPromise.then(function () {
-          load.C = load.n;
-          load.E = null; // indicates completion
-          if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, null, true);
-        }, function (err) {
-          load.er = err;
-          load.E = null;
-          if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, err, true);
-          throw err;
-        });
-        return load.E = execPromise;
+        execPromise = execPromise.then(
+          function () {
+            load.C = load.n;
+            load.E = null; // indicates completion
+            if (!process.env.SYSTEM_PRODUCTION)
+              triggerOnload(loader, load, null, true);
+          },
+          function (err) {
+            load.er = err;
+            load.E = null;
+            if (!process.env.SYSTEM_PRODUCTION)
+              triggerOnload(loader, load, err, true);
+            throw err;
+          }
+        );
+        return (load.E = execPromise);
       }
       // (should be a promise, but a minify optimization to leave out Promise.resolve)
       load.C = load.n;
       load.L = load.I = undefined;
-    }
-    catch (err) {
+    } catch (err) {
       load.er = err;
       throw err;
-    }
-    finally {
+    } finally {
       load.e = null;
-      if (!process.env.SYSTEM_PRODUCTION) triggerOnload(loader, load, load.er, true);
+      if (!process.env.SYSTEM_PRODUCTION)
+        triggerOnload(loader, load, load.er, true);
     }
   }
 }
@@ -6436,9 +6457,17 @@ AbortError.prototype = Object.create(Error.prototype);
 AbortError.prototype.constructor = AbortError;
 AbortError.prototype.name = 'AbortError';
 
+const URL$1 = Url.URL || whatwgUrl.URL;
+
 // fix an issue where "PassThrough", "resolve" aren't a named export for node <10
 const PassThrough$1 = Stream.PassThrough;
-const resolve_url = Url.resolve;
+
+const isDomainOrSubdomain = function isDomainOrSubdomain(destination, original) {
+	const orig = new URL$1(original).hostname;
+	const dest = new URL$1(destination).hostname;
+
+	return orig === dest || orig[orig.length - dest.length - 1] === '.' && orig.endsWith(dest);
+};
 
 /**
  * Fetch function
@@ -6526,7 +6555,19 @@ function fetch(url, opts) {
 				const location = headers.get('Location');
 
 				// HTTP fetch step 5.3
-				const locationURL = location === null ? null : resolve_url(request.url, location);
+				let locationURL = null;
+				try {
+					locationURL = location === null ? null : new URL$1(location, request.url).toString();
+				} catch (err) {
+					// error here can only be invalid URL in Location: header
+					// do not throw when options.redirect == manual
+					// let the user extract the errorneous redirect URL
+					if (request.redirect !== 'manual') {
+						reject(new FetchError(`uri requested responds with an invalid redirect URL: ${location}`, 'invalid-redirect'));
+						finalize();
+						return;
+					}
+				}
 
 				// HTTP fetch step 5.5
 				switch (request.redirect) {
@@ -6573,6 +6614,12 @@ function fetch(url, opts) {
 							timeout: request.timeout,
 							size: request.size
 						};
+
+						if (!isDomainOrSubdomain(request.url, locationURL)) {
+							for (const name of ['authorization', 'www-authenticate', 'cookie', 'cookie2']) {
+								requestOpts.headers.delete(name);
+							}
+						}
 
 						// HTTP-redirect fetch step 9
 						if (res.statusCode !== 303 && request.body && getTotalBytes(request) === null) {
