@@ -45,9 +45,9 @@
     "whatwg-fetch": "^3.0.0"
   },
   "scripts": {
-    "build": "rimraf dist && mkdirp dist && concurrently -n w: 'npm:build:*'",
+    "build": " rimraf dist && mkdirp dist && concurrently -n w: 'npm:build:*'",
     "build:node": "node --experimental-modules build-node.mjs",
-    "build:browser": "rollup -c",
+    "build:browser": "cross-env SYSTEM_PRODUCTION=true rollup -c",
     "build-browser-dev": "rollup -c --environment dev",
     "footprint": "concurrently -n w: 'npm:footprint:*'",
     "footprint:systemjs": "cat dist/system.min.js | gzip -9f | wc -c",
