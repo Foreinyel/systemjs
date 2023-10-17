@@ -25,17 +25,17 @@ function SystemJS() {
   this[REGISTRY] = {};
 }
 
+function isMultiRegistry(register) {
+  return (
+    Array.isArray(register) &&
+    Array.isArray(register[0]) &&
+    Array.isArray(register[0][0])
+  );
+}
+
 var systemJSPrototype = SystemJS.prototype;
 
 systemJSPrototype.import = function (id, parentUrl) {
-  const arr = id.split("/");
-  const resourceName = arr[arr.length - 1].split(".")[0];
-
-  const localAddress = localStorage.getItem(resourceName);
-  if (!localAddress) {
-    localStorage.setItem(resourceName, "");
-  }
-
   const __import__ = function (id, parentUrl) {
     var loader = this;
     return Promise.resolve(loader.prepareImport())
@@ -47,6 +47,17 @@ systemJSPrototype.import = function (id, parentUrl) {
         return load.C || topLevelLoad(loader, load);
       });
   };
+
+  if (!process.env.SYSTEM_DEV) {
+    return __import__.call(this, id, parentUrl);
+  }
+  const arr = id.split("/");
+  const resourceName = arr[arr.length - 1].split(".")[0];
+
+  const localAddress = localStorage.getItem(resourceName);
+  if (!localAddress) {
+    localStorage.setItem(resourceName, "");
+  }
 
   return __import__.call(this, localAddress || id, parentUrl);
 };
@@ -74,7 +85,13 @@ function triggerOnload(loader, load, err, isErrSource) {
 
 var lastRegister;
 systemJSPrototype.register = function (deps, declare) {
-  lastRegister = [deps, declare];
+  if (lastRegister === undefined) {
+    lastRegister = [deps, declare];
+  } else if (isMultiRegistry(lastRegister)) {
+    lastRegister.push([deps, declare]);
+  } else {
+    lastRegister = [lastRegister, [deps, declare]];
+  }
 };
 
 /*
@@ -99,8 +116,8 @@ export function getOrCreateLoad(loader, id, firstParentUrl) {
       return loader.instantiate(id, firstParentUrl);
     })
     .then(
-      function (registration) {
-        if (!registration)
+      function (registrations) {
+        if (!registrations)
           throw Error(
             errMsg(
               2,
@@ -138,19 +155,41 @@ export function getOrCreateLoad(loader, id, firstParentUrl) {
             }
           return value;
         }
-        var declared = registration[1](
-          _export,
-          registration[1].length === 2
-            ? {
-                import: function (importId) {
-                  return loader.import(importId, id);
-                },
-                meta: loader.createContext(id),
-              }
-            : undefined
-        );
-        load.e = declared.execute || function () {};
-        return [registration[0], declared.setters || []];
+
+        if (isMultiRegistry(registrations)) {
+          return registrations.map((registration) => {
+            var declared = registration[1](
+              _export,
+              registration[1].length === 2
+                ? {
+                    import: function (importId) {
+                      return loader.import(importId, id);
+                    },
+                    meta: loader.createContext(id),
+                  }
+                : undefined
+            );
+            load.e = load.e
+              ? [...load.e, declared.execute || function () {}]
+              : [declared.execute || function () {}];
+            return [registration[0], declared.setters || []];
+          });
+        } else {
+          var registration = registrations;
+          var declared = registration[1](
+            _export,
+            registration[1].length === 2
+              ? {
+                  import: function (importId) {
+                    return loader.import(importId, id);
+                  },
+                  meta: loader.createContext(id),
+                }
+              : undefined
+          );
+          load.e = declared.execute || function () {};
+          return [registration[0], declared.setters || []];
+        }
       },
       function (err) {
         load.e = null;
@@ -162,6 +201,32 @@ export function getOrCreateLoad(loader, id, firstParentUrl) {
     );
 
   var linkPromise = instantiatePromise.then(function (instantiation) {
+    if (isMultiRegistry(instantiation)) {
+      return Promise.all(
+        ...instantiation.map((item) => {
+          return item[0].map(function (dep, i) {
+            var setter = item[1][i];
+            return Promise.resolve(loader.resolve(dep, id)).then(function (
+              depId
+            ) {
+              var depLoad = getOrCreateLoad(loader, depId, id);
+              // depLoad.I may be undefined for already-evaluated
+              return Promise.resolve(depLoad.I).then(function () {
+                if (setter) {
+                  depLoad.i.push(setter);
+                  // only run early setters when there are hoisted exports of that module
+                  // the timing works here as pending hoisted export calls will trigger through importerSetters
+                  if (depLoad.h || !depLoad.I) setter(depLoad.n);
+                }
+                return depLoad;
+              });
+            });
+          });
+        })
+      ).then(function (depLoads) {
+        load.d = depLoads;
+      });
+    }
     return Promise.all(
       instantiation[0].map(function (dep, i) {
         var setter = instantiation[1][i];
@@ -293,6 +358,12 @@ function postOrderExec(loader, load, seen) {
 
   function doExec() {
     try {
+      if (Array.isArray(load.e)) {
+        load.e.forEach((e) => {
+          e.call(nullContext);
+        });
+        return;
+      }
       var execPromise = load.e.call(nullContext);
       if (execPromise) {
         execPromise = execPromise.then(
@@ -326,4 +397,4 @@ function postOrderExec(loader, load, seen) {
   }
 }
 
-global.System = new SystemJS();
+global.System2 = global.System = new SystemJS();
